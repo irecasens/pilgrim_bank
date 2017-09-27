@@ -1,0 +1,702 @@
+---
+title: "Ignacio_Recasens_Pilgrim_Bank"
+author: "Ignacio Recasens"
+date: "10 de junio de 2017"
+output: html_document
+---
+
+```{r}
+library(fpp)
+library(fpp2)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(GGally)
+library(grid)
+library(gridExtra)
+library(caTools)
+library(lme4)
+library(dmm)
+library(plotly)
+library(psych)
+
+```
+
+```{r}
+Pilgrim = read_excel("PilgrimBank_Data.xls", sheet = "Data")
+
+str(Pilgrim) 
+summary(Pilgrim)
+
+```
+
+```{r}
+
+str(Pilgrim)
+
+Pilgrim = rename(Pilgrim, Income = Inc)
+Pilgrim$ID = NULL
+
+# Let's look at full cases for now to undertsand which variables really matter.
+Pilgrim_complete = Pilgrim[complete.cases(Pilgrim), ] 
+Pilgrim_complete$District=factor(Pilgrim_complete$District,levels= c("1100","1200","1300"))
+Pilgrim_complete$Online=factor(Pilgrim_complete$Online,levels= c("1","0"))
+levels(Pilgrim_complete$Online) <- list(Online="1", Offline="0")
+Pilgrim_complete$BillPay=factor(Pilgrim_complete$BillPay,levels= c("1","0"))
+levels(Pilgrim_complete$BillPay) <- list(Electronic_BillPay="1", Not_Electronic_BillPay="0")
+str(Pilgrim_complete)
+
+# Are there duplicates?
+Pilgrim_complete = unique(Pilgrim_complete)
+str(Pilgrim_complete)
+
+
+```
+
+```{r}
+
+(31634-21083)
+((31634-21083)/31634)*100
+(21083 - 21054)
+
+print(paste(100*sum(is.na(Pilgrim$Age))/nrow(Pilgrim), "% of data with missing Age values"))
+print(paste(100*sum(is.na(Pilgrim$Income))/nrow(Pilgrim), "% of data with missing Income values"))
+print(paste(100*sum(is.na(Pilgrim$Tenure))/nrow(Pilgrim), "% of data with missing Tenure values"))
+print(paste(100*sum(is.na(Pilgrim$District))/nrow(Pilgrim), "% of data with missing District values"))
+print(paste(100*sum(is.na(Pilgrim$Online))/nrow(Pilgrim), "% of data with missing Online values"))
+print(paste(100*sum(is.na(Pilgrim$BillPay))/nrow(Pilgrim), "% of data with missing BillPay values"))
+print(paste(100*sum(is.na(Pilgrim$Profit))/nrow(Pilgrim), "% of data with missing Profit values"))
+
+
+
+```
+
+```{r}
+tmp1 = nrow(Pilgrim[is.na(Pilgrim$Income) & !is.na(Pilgrim$Age) & !is.na(Pilgrim$Tenure) & !is.na(Pilgrim$District) & !is.na(Pilgrim$Online) & !is.na(Pilgrim$BillPay) ,])
+print(paste("Added rows by filling Blank Incomes: ", tmp1))
+
+tmp2 = nrow(Pilgrim[is.na(Pilgrim$Age) & !is.na(Pilgrim$Income) & !is.na(Pilgrim$Tenure) & !is.na(Pilgrim$District) & !is.na(Pilgrim$Online) & !is.na(Pilgrim$BillPay) ,])
+print(paste("Added rows by filling Blank Ages: ", tmp2))
+
+tmp3 = nrow(Pilgrim[is.na(Pilgrim$Tenure) & !is.na(Pilgrim$Income) & !is.na(Pilgrim$Age) & !is.na(Pilgrim$District) & !is.na(Pilgrim$Online) & !is.na(Pilgrim$BillPay) ,])
+print(paste("Added rows by filling Blank Tenures: ", tmp3))
+
+print(paste(round((tmp1 + tmp2 + tmp3)/nrow(Pilgrim_complete),3)*100, "% of data can be added to complete cases"))
+
+```
+
+```{r}
+# Check OUTLIERs
+
+plot_ly(Pilgrim_complete, x = ~Age, y = ~Profit, 
+             color = ~Online, colors = c("#1f77b4", "gray"))
+
+```
+
+```{r}
+
+Pilgrim_complete[Pilgrim_complete$Profit > 10000,]
+100*(Pilgrim_complete[Pilgrim_complete$Profit > 10000,]$Profit/mean(Pilgrim_complete$Profit)-1)
+
+Pilgrim_complete[Pilgrim_complete$Profit < -1000,]
+100*(Pilgrim_complete[Pilgrim_complete$Profit < -1000,]$Profit/mean(Pilgrim_complete$Profit)-1)
+
+
+```
+
+```{r}
+
+# Outliers in this case should be deleted since their behavior is not representative.
+Pilgrim_complete = filter(Pilgrim_complete, Profit < 10000)
+Pilgrim_complete = filter(Pilgrim_complete, Profit > -1000)
+
+```
+
+```{r}
+
+plot_ly(Pilgrim_complete, x = ~Age, y = ~Profit, 
+             color = ~Online, colors = c("#1f77b4", "gray"))
+
+```
+
+```{r}
+# After outlirs have been removed, for the remaining cases extremes outside the range of [1%-99%] should be 
+# smoothed out (CAPPING)
+quantile(Pilgrim_complete$Profit, probs=c(.001, .01,.05, 0.1, 0.25, 0.5, 0.75, 0.9, .95, 0.99, 0.999))
+
+
+```
+
+```{r}
+# OUTLIERS TREATMENT (CAPPING)
+
+for(i in colnames(Pilgrim_complete))
+    {
+    if (i == "Profit"  ) {
+        qnt_threshold <- quantile(Pilgrim_complete[[i]], probs=.99, na.rm = T)[1]
+
+        txt = paste('Pilgrim_complete$', i, '[Pilgrim_complete$', i,  '> qnt_threshold] <- qnt_threshold', sep="" )
+        eval(parse(text=txt))       
+    }
+}
+
+for(i in colnames(Pilgrim_complete))
+    {
+    if (i == "Profit"  ) {
+        qnt_threshold <- quantile(Pilgrim_complete[[i]], probs=.01, na.rm = T)[1]
+
+        txt = paste('Pilgrim_complete$', i, '[Pilgrim_complete$', i,  '< qnt_threshold] <- qnt_threshold', sep="" )
+        eval(parse(text=txt))       
+    }
+}
+
+quantile(Pilgrim_complete$Profit, probs=c(.001, .01,.05, 0.1, 0.25, 0.5, 0.75, 0.9, .95, 0.99, 0.999))
+
+```
+
+```{r}
+
+table(Pilgrim_complete$Online,Pilgrim_complete$BillPay)
+
+# Two cases that shouldnt be possible, eletronic BillPay but not online? }
+# Dirty data should be removed, we can't assume either case.
+
+
+
+```
+
+```{r}
+Pilgrim_complete[Pilgrim_complete$Online == "Offline" & Pilgrim_complete$BillPay == "Electronic_BillPay",]
+Pilgrim_complete = filter(Pilgrim_complete, !(Pilgrim_complete$Online == "Offline" & Pilgrim_complete$BillPay == "Electronic_BillPay") )
+
+
+```
+
+```{r}
+describe(Pilgrim_complete)[c("Age","Income","Tenure", "Profit"),]
+
+```
+
+```{r}
+online_customers =  nrow(filter(Pilgrim_complete, Pilgrim_complete$Online == "Online"))
+online_age_under_4 = nrow(filter(Pilgrim_complete, Pilgrim_complete$Age <= 4 & Pilgrim_complete$Online == "Online"))
+online_age_under_3 = nrow(filter(Pilgrim_complete, Pilgrim_complete$Age <= 3 & Pilgrim_complete$Online == "Online"))
+
+print(paste("Online Custonmers under 45 years old: ", round(online_age_under_4/online_customers,2)*100, "%"))
+print(paste("Online Custonmers under 35 years old: ", round(online_age_under_3/online_customers,2)*100, "%"))
+
+
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black") #1f77b4")
+y_axis =list(title = "Frequency", titlefont = my_font)
+
+x_axis = list(title = "Age", titlefont = my_font)
+
+hist1 = filter(Pilgrim_complete, Online == "Online")
+hist2 = filter(Pilgrim_complete, Online == "Offline")
+
+p = plot_ly(alpha = 0.8) %>%
+    add_histogram(x = ~ hist2$Age, name = 'Offline') %>%
+    add_histogram(x = ~ hist1$Age, name = 'Online')%>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+embed_notebook(p)
+
+aggregate(Pilgrim_complete, by=list(Pilgrim_complete$Online, Pilgrim_complete$Age), FUN=length)
+
+
+
+```
+
+```{r}
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black") #1f77b4")
+y_axis =list(title = "Cumulative Profits", titlefont = my_font)
+x_axis = list(title = "Number of customers", titlefont = my_font)
+
+
+plot_ly(Pilgrim_complete, x = ~ 1:nrow(Pilgrim_complete), y = ~cumsum(sort(Profit))) %>%
+    layout(title = "Cumulative Profits Distribution", xaxis = x_axis, yaxis = y_axis )
+
+
+```
+
+```{r}
+
+dfa = setNames(aggregate(Pilgrim_complete[,"BillPay"], by=list(Pilgrim_complete$Online, Pilgrim_complete$BillPay), FUN=length), c("Online_group", "Electronic Group" ,"Freq"))
+dfa$Share = dfa[,"Freq"]/nrow(Pilgrim_complete)
+dfa
+
+dfb = setNames(aggregate(Pilgrim_complete[,"BillPay"], by=list(Pilgrim_complete$BillPay), FUN=length), c("Electronic Group" ,"Freq"))
+dfb$Share = dfb[,"Freq"]/nrow(Pilgrim_complete)
+dfb
+
+dfc = setNames(aggregate(Pilgrim_complete[,"BillPay"], by=list(Pilgrim_complete$Online), FUN=length), c("Online_group" ,"Freq"))
+dfc$Share = dfc[,"Freq"]/nrow(Pilgrim_complete)
+dfc
+
+
+```
+
+```{r}
+
+dfa = setNames(aggregate(Pilgrim_complete[,"BillPay"], by=list(Pilgrim_complete$Age), FUN=length), c("Age_group" ,"Freq"))
+dfa$Share = dfa[,"Freq"]/nrow(Pilgrim_complete)
+dfa
+
+
+```
+
+```{r}
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black") #1f77b4")
+y_axis =list(title = "Frequency", titlefont = my_font)
+
+x_axis = list(title = "Age", titlefont = my_font)
+
+hist1 = filter(Pilgrim_complete, Online == "Online" & BillPay == "Not_Electronic_BillPay")
+hist2 = filter(Pilgrim_complete, BillPay == "Electronic_BillPay")
+
+ plot_ly(alpha = 0.8) %>%
+    add_histogram(x = ~ hist1$Age, name = 'Online but Not Electronic BillPay') %>%
+    add_histogram(x = ~ hist2$Age, name = 'Electronic BillPay') %>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+
+
+aggregate(Pilgrim_complete, by=list(Pilgrim_complete$Online, Pilgrim_complete$Age), FUN=length)
+
+
+```
+
+```{r}
+quantile(Pilgrim_complete$Profit, probs=c(0,0.1, 0.25, 0.4, 0.5, 0.75, 0.9, 1))
+
+print(paste("Customers with negative Profit: ", round(nrow(filter(Pilgrim_complete, Profit < 0))/nrow(Pilgrim_complete),2)*100, "%" ))
+print(paste("Customers with Profit above mean: ", round(nrow(filter(Pilgrim_complete, Profit >  mean(Pilgrim_complete$Profit) ))/nrow(Pilgrim_complete),2)*100, "%" ))
+
+print(paste("Average Profit per Customer: ", mean(Pilgrim_complete$Profit) ))
+
+Pilgrim_online = filter(Pilgrim_complete, Online == "Online")
+Pilgrim_offline = filter(Pilgrim_complete, Online == "Offline")
+Pilgrim_Electronic_Bill = filter(Pilgrim_complete, BillPay == "Electronic_BillPay")
+Pilgrim_online_not_Electronic = filter(Pilgrim_complete, Online == "Online" & BillPay != "Electronic_BillPay")
+
+print(paste("Average Profit per Customer Online: ", mean(Pilgrim_online$Profit) ))
+
+print(paste("Average Profit per Customer Offline: ", mean(Pilgrim_offline$Profit) ))
+
+print(paste("Average Profit per Customer with Electronic Bill: ", mean(Pilgrim_Electronic_Bill$Profit) ))
+
+print(paste("Average Profit per Customer Online without Electronic Bill: ", mean(Pilgrim_online_not_Electronic$Profit) ))
+
+
+print(paste("Increase in Profit for Customers Online: ", round(mean(Pilgrim_online$Profit)/mean(Pilgrim_offline$Profit)-1,2)*100, "%" ))
+
+print(paste("Increase in Profit for Customers with Electronic Bill Pay: ", round(mean(Pilgrim_Electronic_Bill$Profit)/mean(Pilgrim_offline$Profit)-1,2)*100, "%" ))
+
+print(paste("Increase in Profit for Customers Online without Electronic Bill Pay: ", round(mean(Pilgrim_online_not_Electronic$Profit)/mean(Pilgrim_offline$Profit)-1,2)*100, "%" ))
+
+df1 = setNames(aggregate(Pilgrim_complete[,"Profit"], by=list(Pilgrim_complete$Age), FUN=sum), c("Age_group", "Profit"))
+df2 = setNames(aggregate(Pilgrim_complete[,"Profit"], by=list(Pilgrim_complete$Age), FUN=length), c("Age_group", "Freq"))
+df3 = setNames(aggregate(Pilgrim_online[,"Profit"], by=list(Pilgrim_online$Age), FUN=sum), c("Age_group", "Profit_online"))
+df4 = setNames(aggregate(Pilgrim_online[,"Profit"], by=list(Pilgrim_online$Age), FUN=length), c("Age_group", "Freq_online"))
+df5 = setNames(aggregate(Pilgrim_offline[,"Profit"], by=list(Pilgrim_offline$Age), FUN=sum), c("Age_group", "Profit_offline"))
+df6 = setNames(aggregate(Pilgrim_offline[,"Profit"], by=list(Pilgrim_offline$Age), FUN=length), c("Age_group", "Freq_offline"))
+df7 = setNames(aggregate(Pilgrim_Electronic_Bill[,"Profit"], by=list(Pilgrim_Electronic_Bill$Age), FUN=sum), c("Age_group", "Profit_Electronic_Bill"))
+df8 = setNames(aggregate(Pilgrim_Electronic_Bill[,"Profit"], by=list(Pilgrim_Electronic_Bill$Age), FUN=length), c("Age_group", "Freq_Electronic_Bill"))
+df9 = setNames(aggregate(Pilgrim_online_not_Electronic[,"Profit"], by=list(Pilgrim_online_not_Electronic$Age), FUN=sum), c("Age_group", "Profit_Online_not_Electronic_Bill"))
+df10 = setNames(aggregate(Pilgrim_online_not_Electronic[,"Profit"], by=list(Pilgrim_online_not_Electronic$Age), FUN=length), c("Age_group", "Freq_Online_not_Electronic_Bill"))
+
+df11 = merge(df1, df2, by="Age_group")
+df11 = merge(df11, df3, by="Age_group")
+df11 = merge(df11, df4, by="Age_group")
+df11 = merge(df11, df5, by="Age_group")
+df11 = merge(df11, df6, by="Age_group")
+df11 = merge(df11, df7, by="Age_group")
+df11 = merge(df11, df8, by="Age_group")
+df11 = merge(df11, df9, by="Age_group")
+df11 = merge(df11, df10, by="Age_group")
+
+df11$Profit_by_Customer = df11[,"Profit"]/df11[,"Freq"]
+df11$Profit_by_Customer_online = df11[,"Profit_online"]/df11[,"Freq_online"]
+df11$Profit_by_Customer_offline = df11[,"Profit_offline"]/df11[,"Freq_offline"]
+df11$Profit_by_Customer_Electronic = df11[,"Profit_Electronic_Bill"]/df11[,"Freq_Electronic_Bill"]
+df11$Profit_by_Customer_online_not_Electronic = df11[,"Profit_Online_not_Electronic_Bill"]/df11[,"Freq_Online_not_Electronic_Bill"]
+
+df11$Profit_increase_to_online = round(df11$Profit_by_Customer_online/df11$Profit_by_Customer_offline -1,2)*100
+df11$Profit_increase_to_electronic = round(df11$Profit_by_Customer_Electronic/df11$Profit_by_Customer_offline -1,2)*100
+df11$Profit_increase_to_online_not_electronic = round(df11$Profit_by_Customer_online_not_Electronic/df11$Profit_by_Customer_offline -1,2)*100
+
+df11$Customers_pct = round(df11[,"Freq"]/nrow(Pilgrim_complete),3)*100
+df11$Customers_online_pct = round(df11[,"Freq_online"]/nrow(Pilgrim_online),3)*100
+df11$Customers_offline_pct = round(df11[,"Freq_offline"]/nrow(Pilgrim_offline),3)*100
+df11$Customers_Electronic_pct = round(df11[,"Freq_Electronic_Bill"]/nrow(Pilgrim_Electronic_Bill),3)*100
+df11$Customers_online_not_Electronic_pct = round(df11[,"Freq_Online_not_Electronic_Bill"]/nrow(Pilgrim_online_not_Electronic),3)*100
+
+df11[,c("Profit_by_Customer",  "Profit_by_Customer_offline", "Profit_by_Customer_online", "Profit_increase_to_online",  "Profit_by_Customer_Electronic", "Profit_increase_to_electronic", "Profit_by_Customer_online_not_Electronic", "Profit_increase_to_online_not_electronic", "Customers_pct",  "Customers_offline_pct", "Customers_online_pct",  "Customers_Electronic_pct",  "Customers_online_not_Electronic_pct")]
+
+
+
+
+```
+
+```{r}
+
+Pilgrim_complete2 = Pilgrim_complete
+Pilgrim_complete2$Online_Electronic_var = ifelse(
+    Pilgrim_complete2$Online == "Online" & Pilgrim_complete2$BillPay == "Electronic_BillPay", "Online_Electronic",
+    ifelse(Pilgrim_complete2$Online == "Online" & Pilgrim_complete2$BillPay != "Electronic_BillPay", "Online_Not_Electronic", "Offline"))
+
+
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black") #1f77b4")
+y_axis =list(title = "Profit", titlefont = my_font)
+x_axis = list(title = "Group", titlefont = my_font)
+
+plot_ly( y = ~Pilgrim_complete2$Profit, 
+             color = ~Pilgrim_complete2$Online_Electronic_var,
+             type = "box")%>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+```
+
+```{r}
+
+# Test if there's statistical significance in the difference between profits 
+# Of online/offline and Electornic/Not Electornic Bill Payments
+
+Profit_Online = filter(Pilgrim_complete, Online == "Online")
+Profit_Online_Electronic = filter(Pilgrim_complete, Pilgrim_complete2$BillPay == "Electronic_BillPay")
+Profit_Online_not_Electronic = filter(Pilgrim_complete, Online == "Online" & Pilgrim_complete2$BillPay == "Not_Electronic_BillPay")
+Profit_Offline = filter(Pilgrim_complete, Online == "Offline")
+
+bin_width = 40
+
+p1 = ggplot(Profit_Offline, aes(Profit)) + geom_histogram(binwidth= bin_width) + xlab("Profit") + ylab("Frequency")  + ggtitle("Offline") 
+p2 = ggplot(Profit_Online, aes(Profit)) + geom_histogram(binwidth= bin_width) + xlab("Profit") + ylab("Frequency")  + ggtitle("Online")
+p3 = ggplot(Profit_Online_Electronic, aes(Profit)) + geom_histogram(binwidth= bin_width) + xlab("Profit") + ylab("Frequency")  + ggtitle("Online Electronic")
+p4 = ggplot(Profit_Online_not_Electronic, aes(Profit)) + geom_histogram(binwidth= bin_width) + xlab("Profit") + ylab("Frequency")  + ggtitle("Online Not Electronic")
+
+grid.arrange(p1, p2, p3, p4 , ncol=2)
+
+# Test Normality through Shapiro Test
+# null-hypothesis: population normally distributed. 
+# Alternative Hypothesis: Not normally distributed.
+# p-value < 0.05 null hypothesis is rejected, data not normal. 
+# p-value > 0.05 null Hypothesis is true and data is normal.
+set.seed(77) 
+sample = sample.split(Profit_Offline$Profit, SplitRatio = .75)
+sample_Profit_Offline = subset(Profit_Offline, sample == FALSE)
+
+shapiro.test(sample_Profit_Offline$Profit)
+shapiro.test(Profit_Online$Profit)
+shapiro.test(Profit_Online_Electronic$Profit)
+shapiro.test(Profit_Online_not_Electronic$Profit)
+
+
+# Since the data is not Normal, check if different with Wilcoxon Test
+# H0: Groups are equal
+# Ha: Gorups are NOT equal
+# p-value < 0.05 null hypothesis is rejected, they are different. 
+# p-value > 0.05 null Hypothesis is true and both are equal.
+
+wilcox.test(Profit_Offline$Profit, Profit_Online$Profit) # Is the 15% difference statistically significant?
+wilcox.test(Profit_Offline$Profit, Profit_Online_not_Electronic$Profit) # Is the 5% difference statistically significant?
+wilcox.test(Profit_Offline$Profit, Profit_Online_Electronic$Profit) # Is the 71% difference statistically significant?
+
+
+# Even though the data is not normal, since we have more than 100 obsevrations 
+# for each case the t-test (assumes normality) can still be valid. 
+
+t.test(Profit_Offline$Profit, Profit_Online$Profit) # Is the 15% difference statistically significant?
+t.test(Profit_Offline$Profit, Profit_Online_not_Electronic$Profit) # Is the 5% difference statistically significant?
+t.test(Profit_Offline$Profit, Profit_Online_Electronic$Profit) # Is the 71% difference statistically significant?
+
+
+```
+
+```{r}
+
+print("Profit differences accros District:")
+tapply(Pilgrim_complete$Profit, Pilgrim_complete$District, mean)
+
+print("Income differences accros District:")
+tapply(Pilgrim_complete$Income, Pilgrim_complete$District, mean)
+
+
+print("Profit differences accros Income Bucket:")
+tapply(Pilgrim_complete$Profit, Pilgrim_complete$Income, mean)
+
+
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black") #1f77b4")
+y_axis =list(title = "Profit", titlefont = my_font)
+x_axis = list(title = "District", titlefont = my_font)
+
+plot_ly( y = ~Pilgrim_complete$Profit, 
+             color = ~Pilgrim_complete$District,
+             type = "box")%>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+y_axis =list(title = "Income", titlefont = my_font)
+plot_ly( y = ~Pilgrim_complete$Income, 
+             color = ~Pilgrim_complete$District,
+             type = "box")%>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+```
+
+```{r}
+
+Pilgrim_complete3 = Pilgrim_complete
+Pilgrim_complete3$Income = ifelse(Pilgrim_complete3$Income <=3, "Less than 30k",
+                                  ifelse(Pilgrim_complete3$Income <=6, "30k - 74k",
+                                        ifelse(Pilgrim_complete3$Income <9, "75k - 125k", "More than 125k")))
+Pilgrim_complete3$Income = factor(Pilgrim_complete3$Income, levels=c("Less than 30k","30k - 74k","75k - 125k", "More than 125k") )
+
+Pilgrim_complete3 = Pilgrim_complete3[, c("Profit", "Income")]
+
+my_font = list(family = "Helvetica New, monospace", size = 18, color = "black")
+y_axis =list(title = "Profit", titlefont = my_font)
+x_axis = list(title = "Income", titlefont = my_font)
+
+plot_ly( y = ~Pilgrim_complete3$Profit, 
+             color = ~Pilgrim_complete3$Income,
+             type = "box")%>%
+    layout(xaxis = x_axis, yaxis = y_axis, barmode = "overlay" )
+
+
+```
+
+```{r}
+
+cor(Pilgrim_complete[,c(1,2,3,7)])
+
+ggcorr(Pilgrim_complete[,c(1,2,3,7)], 
+       geom = "blank", label = TRUE, hjust = 0.75) +
+  geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient) > 0.07)) +
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) +
+  guides(color = FALSE, alpha = FALSE)
+
+# Correlations are very weak
+
+
+```
+
+```{r}
+
+scat <-function(x,y,x_name, y_name, dt){
+#print(paste("y = ", y_name, " x = ", x_name))
+#print(summary(lm(y ~ x , data = dt)))
+fit = lm(y ~ x , data = dt)
+intercept <- round(coef(fit)[1],2)
+slope <- round(coef(fit)[2],3)
+corr <- round(cor(x, y),3)
+    
+graph <- ggplot(dt,aes(x,y)) + geom_jitter(alpha=0.5) + geom_smooth(method="lm", col="#FFC000") + ggtitle(paste("y = ", y_name, " x = ", x_name, "\nSlope: " , slope, " Corr: " , corr  ))+ theme(plot.title = element_text(size = 10, face = "bold")) + xlab(x_name) + ylab(y_name) 
+graph_res <- ggplot(fit, aes(x, fit$residuals))+ geom_jitter(alpha=0.5)+ geom_hline(yintercept=0, col = "red")
+  
+return(list(main_graph = graph, residuals_graph = graph_res)) 
+}
+
+y <- Pilgrim_complete$Profit
+y_name <- 'Profit'
+x <- Pilgrim_complete$Income
+x_name <- 'Income'
+p1 = scat(x,y,x_name, y_name, Pilgrim_complete)$main_graph
+p1_b = scat(x,y,x_name, y_name, Pilgrim_complete)$residuals_graph
+
+
+x <- Pilgrim_complete$Age
+x_name <- 'Age'
+p2 = scat(x,y,x_name, y_name, Pilgrim_complete)$main_graph
+p2_b = scat(x,y,x_name, y_name, Pilgrim_complete)$residuals_graph
+
+x <- Pilgrim_complete$Tenure
+x_name <- 'Tenure'
+p3 = scat(x,y,x_name, y_name, Pilgrim_complete)$main_graph
+p3_b = scat(x,y,x_name, y_name, Pilgrim_complete)$residuals_graph
+
+#grid.arrange(p1, p1_b, p2, p2_b,  p3, p3_b, ncol=2)
+
+grid.arrange(p1,  p2,  p3,  ncol=3, nrow = 2)
+
+
+
+```
+
+
+```{r}
+
+fit <- lm(Profit ~ Tenure, data=Pilgrim_complete)
+summary(fit)
+
+# Tenure piecewer linear
+Tenurep <- pmax(Pilgrim_complete$Tenure-15,0)  
+
+fit <- lm(Profit ~ Tenure + Tenurep, data=Pilgrim_complete)
+summary(fit)
+
+b.0 = coef(fit)[1]
+b.1 = coef(fit)[2]
+b.2 = coef(fit)[3]
+x.0  = seq(0,15,1)
+x.1  = seq(15,50,1)
+y.0 = b.0 + b.1 * x.0
+y.1 = (b.0 + b.1*15 + (b.1 + b.2) * x.1)
+
+plot(jitter(Profit)~jitter(Tenure),xlab="Tenure",ylab="Profit",data=Pilgrim_complete)
+lines(x.0,y.0, col = "red")
+lines(x.1,y.1, col = "red")
+
+res<-residuals(fit)
+plot(jitter(res)~jitter(Tenure),ylab="Residuals",xlab="Tenure",data=Pilgrim_complete)
+abline(0,0, col=2)
+
+
+
+
+```
+
+```{r}
+
+fit = lm(Profit ~ ., data = Pilgrim_complete )
+summary(fit)
+
+
+```
+
+```{r}
+set.seed(77) 
+sample = sample.split(Pilgrim_complete$Profit, SplitRatio = .75)
+train = subset(Pilgrim_complete, sample == TRUE)
+test  = subset(Pilgrim_complete, sample == FALSE)
+
+nrow(Pilgrim_complete)
+nrow(train)
+nrow(test)
+```
+
+```{r}
+fit = lm(Profit ~ ., data = train )
+summary(fit)
+
+fcast = forecast(fit,newdata = test) 
+measure = accuracy(fcast, test$Profit)
+measure
+```
+
+```{r}
+# TO Avoid getting inf or NaN in MPE and MAPE: 
+
+filter(test, test$Profit == 0)
+nrow(filter(test, test$Profit == 0))
+
+test$Profit[test$Profit == 0] = 0.0001
+train$Profit[train$Profit == 0] = 0.0001
+
+fit = lm(Profit ~ ., data = train )
+summary(fit)
+
+fcast = forecast(fit,newdata = test) 
+measure=accuracy(fcast, test$Profit)
+measure
+```
+
+```{r}
+Tenurep <- pmax(train$Tenure-15,0)  
+train$offline_var = 1*(train$Online=="Offline")
+train$not_Electronic_var = 1*(train$BillPay=="Not_Electronic_BillPay")
+
+fit1 = lm(Profit ~ Age + I(Age^2) + Income + I(Income^2) + I(Income*Age) + I(Income*Tenure) + I(Income * offline_var ) + I(Income * not_Electronic_var) + Tenure + Tenurep + District + Online  + BillPay, data = train )
+summary(fit1)
+
+fit2 = lm(Profit ~ Age + I(Age^2) + Income + I(Income^2) + I(Income*Age) + I(Income * offline_var ) + I(Income * not_Electronic_var) + Tenure + Tenurep + District  + Online  + BillPay, data = train )
+summary(fit2)
+
+fit3 = lm(Profit ~ Age + Income + I(Income^2) + I(Income*Age) + I(Income * offline_var ) + I(Income * not_Electronic_var) + Tenure + Tenurep + District  + Online + BillPay, data = train )
+summary(fit3)
+
+fit4 = lm(Profit ~ Age + Income + I(Income^2) + I(Income*Age) + I(Income * offline_var ) + I(Income * not_Electronic_var) + Tenure + Tenurep + District + BillPay, data = train )
+summary(fit4)
+
+fit5 = lm(Profit ~ Age + Income + I(Income^2) + I(Income*Age) + I(Income * offline_var ) + I(Income * not_Electronic_var) + Tenure + Tenurep + District , data = train )
+summary(fit5)
+
+```
+
+```{r}
+CV(fit)
+CV(fit2)
+CV(fit3)
+CV(fit4)
+CV(fit5)
+```
+
+```{r}
+new_Income = median(Pilgrim_complete$Income)
+new_Age = median(Pilgrim_complete$Age)
+new_Tenure = median(Pilgrim_complete$Tenure) 
+new_Tenurep <- pmax(new_Tenure-15,0)
+new_District = "1200"
+new_Online = "Online"
+new_BillPay = "Electronic_BillPay"
+
+offline_var = 1*(new_Online=="Offline")
+not_Electronic_var = 1*(new_BillPay=="Not_Electronic_BillPay")
+
+new_data = data.frame(Income=new_Income , Age=new_Age,Tenure=new_Tenure, Tenurep = new_Tenurep, District = new_District, Online = new_Online, BillPay = new_BillPay, offline_var =offline_var , not_Electronic_var=not_Electronic_var)
+
+```
+
+```{r}
+fcast = forecast(fit5,newdata = new_data) 
+summary(fcast)
+```
+
+```{r}
+test$Tenurep <- pmax(test$Tenure-15,0) 
+test$offline_var = 1*(test$Online=="Offline")
+test$not_Electronic_var = 1*(test$BillPay=="Not_Electronic_BillPay")
+
+fcast_naive = mean(train$Profit)
+measure_naive=accuracy(fcast_naive, test$Profit)
+measure_naive
+
+fcast1=forecast(fit1,newdata= test)
+measure1=accuracy(fcast1, test$Profit)
+measure1
+
+fcast2=forecast(fit2,newdata= test)
+measure2=accuracy(fcast2, test$Profit)
+measure2
+
+fcast3=forecast(fit3,newdata= test)
+measure3=accuracy(fcast3, test$Profit)
+measure3
+
+fcast4=forecast(fit4,newdata= test)
+measure4=accuracy(fcast4, test$Profit)
+measure4
+
+fcast5=forecast(fit5,newdata= test)
+measure5=accuracy(fcast5, test$Profit)
+measure5
+
+```
+
+```{r}
+# Diebold and Mariano Test
+# Is the model 5 really better than 1?
+
+rmse5=sqrt(mean((test$Profit-fcast5$mean)^2))
+rmse1=sqrt(mean((test$Profit-fcast1$mean)^2))
+
+dm.test((test$Profit-fcast5$mean),(test$Profit-fcast1$mean),power=2)
+dm.test((test$Profit-fcast5$mean),(test$Profit-fcast1$mean),power=2, alternative='l') # g means "greater than"
+# (if p-val <0.05  the model 5 has less error.)
+
+dm.test((test$Profit-fcast5$mean),(test$Profit-fcast_naive),power=2)
+dm.test((test$Profit-fcast5$mean),(test$Profit-fcast_naive),power=2, alternative='l') # g means "greater than"
+# (if p-val <0.05  the model 5 has less error.) So definitely better than naive.
+
+```
+
+
